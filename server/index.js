@@ -38,6 +38,46 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Default products (fallback when DB is unavailable)
+const DEFAULT_PRODUCTS = [
+  {
+    id: "1",
+    name: "Toyota Camry 2020 LE",
+    category: "car",
+    image: "https://images.unsplash.com/photo-1621007947152-e93c2fc9486b?w=800",
+    condition: "UAE / US Used",
+    originalPrice: "$18,500",
+    preorderPrice: "$16,200",
+    deposit: "$500",
+    badge: "Most Popular",
+    whatsappMsg: "Hello! I'm interested in the Toyota Camry 2020 LE. Can you guide me on the deposit process?"
+  },
+  {
+    id: "2",
+    name: "MacBook Pro M3 Max (14-inch)",
+    category: "laptop",
+    image: "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=800",
+    condition: "UK Used - Grade A",
+    originalPrice: "$2,499",
+    preorderPrice: "$2,150",
+    deposit: "$100",
+    badge: "Limited Slots",
+    whatsappMsg: "Hi, I want to reserve the MacBook Pro M3 Max. Is it still available for the $2,150 preorder price?"
+  },
+  {
+    id: "3",
+    name: "iPhone 15 Pro Max (256GB)",
+    category: "smartphone",
+    image: "https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=800",
+    condition: "US Used - Like New",
+    originalPrice: "$1,199",
+    preorderPrice: "$980",
+    deposit: "$50",
+    badge: "Flash Sale",
+    whatsappMsg: "Hello, I'd like to preorder the iPhone 15 Pro Max. Please send me the payment details for the $50 deposit."
+  }
+];
+
 // GET /api/products - Returns all active products
 app.get('/api/products', async (req, res) => {
   try {
@@ -75,10 +115,12 @@ app.get('/api/products', async (req, res) => {
       whatsappMsg: row.whatsappMsg
     }));
     
-    res.json({ products });
+    // If DB has products, return them; otherwise return defaults
+    res.json({ products: products.length > 0 ? products : DEFAULT_PRODUCTS });
   } catch (err) {
-    console.error('Error fetching products:', err);
-    res.status(500).json({ error: 'Failed to fetch products', products: [] });
+    console.error('Error fetching products:', err.message);
+    // Return fallback products if DB is down
+    res.json({ products: DEFAULT_PRODUCTS });
   }
 });
 
@@ -244,21 +286,40 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
-// Start server
+// Start server — always start, even if DB is unavailable
 async function startServer() {
+  let dbConnected = false;
+  
+  // Try database connection, but don't crash if it fails
   try {
-    // Test database connection
     await pool.query('SELECT 1');
+    dbConnected = true;
     console.log('✅ Database connected successfully');
-    
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📡 API available at /api/products`);
-      console.log(`🌐 Frontend served from ${distPath}`);
-    });
   } catch (err) {
-    console.error('❌ Failed to start server:', err);
-    process.exit(1);
+    console.warn('⚠️ Database not available yet, starting without DB');
+    console.warn('   API will return empty products until DB connects');
+    console.warn(`   Error: ${err.message}`);
+  }
+  
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📡 API available at /api/products`);
+    console.log(`🌐 Frontend served from ${distPath}`);
+    console.log(`💾 Database: ${dbConnected ? 'connected' : 'waiting for connection'}`);
+  });
+  
+  // Background DB reconnect (every 10s if not connected)
+  if (!dbConnected) {
+    const reconnect = setInterval(async () => {
+      try {
+        await pool.query('SELECT 1');
+        console.log('✅ Database connected!');
+        dbConnected = true;
+        clearInterval(reconnect);
+      } catch (e) {
+        // Still can't connect, keep trying
+      }
+    }, 10000);
   }
 }
 
